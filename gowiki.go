@@ -8,12 +8,31 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
+
+// Configure the upgrader
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
 
 // Model
 type Page struct {
 	Title string
 	Body  []byte
+}
+
+type Payload struct {
+	Counter int
+	Message string
+}
+
+type Request struct {
+	Message string
 }
 
 func (p *Page) save() error {
@@ -94,16 +113,38 @@ func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
 	http.Redirect(w, r, "/view/"+title, http.StatusFound)
 }
 
+func handleConnections(w http.ResponseWriter, r *http.Request) {
+	// Upgrade initial GET request to a websocket
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer ws.Close()
+
+	var msg Request
+	// Read in a new message as JSON and map it to a Message object
+	err = ws.ReadJSON(&msg)
+
+	for counter := 0; counter <= 1000; counter++ {
+		err = ws.WriteJSON(Payload{Counter: counter, Message: msg.Message})
+		if err != nil {
+			log.Printf("error: %v", err)
+			break
+		}
+		time.Sleep(time.Duration(counter) * time.Second)
+	}
+
+	//go notifyClient(ws)
+
+}
+
 func main() {
 
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/view/", makeHandler(viewHandler))
 	http.HandleFunc("/edit/", makeHandler(editHandler))
 	http.HandleFunc("/save/", makeHandler(saveHandler))
+	http.HandleFunc("/ws", handleConnections)
 	log.Fatal(http.ListenAndServe(":8080", nil))
-
-	//p1 := &Page{Title: "TestPage", Body: []byte("This is a sample Page.")}
-	//p1.save()
-	//p2, _ := loadPage("TestPage")
-	//fmt.Println(string(p2.Body))
 }
